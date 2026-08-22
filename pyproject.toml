@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-beacon"
+version = "0.1.0"
+description = "Truthful, lineage-scoped status reporting from verified agent-runtime evidence"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Simon Kim"}]
+keywords = ["agents", "observability", "status", "lineage", "hermes-agent"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/seojoonkim/agent-beacon"
+Repository = "https://github.com/seojoonkim/agent-beacon"
+Issues = "https://github.com/seojoonkim/agent-beacon/issues"
+Changelog = "https://github.com/seojoonkim/agent-beacon/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["build>=1", "pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_beacon = ["schema/*.json"]

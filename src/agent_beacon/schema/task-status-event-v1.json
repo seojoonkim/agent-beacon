@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-beacon.dev/schema/task-status-event-v1.json",
+  "title": "Agent Beacon Task Status Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "lineage", "phase", "observed_at", "waiting_on_worker", "live_worker_count", "process_active"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "platform", "account", "chat_id", "topic_id", "session_key", "run_id"],
+      "properties": {
+        "profile": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "minLength": 1},
+        "account": {"type": "string", "minLength": 1},
+        "chat_id": {"type": "string", "minLength": 1},
+        "topic_id": {"type": "string", "minLength": 1},
+        "session_key": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "phase": {"enum": ["announced", "active", "blocked", "paused", "completed"]},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "waiting_on_worker": {"type": "boolean"},
+    "live_worker_count": {"type": "integer", "minimum": 0},
+    "process_active": {"type": "boolean"}
+  }
+}
