@@ -2,6 +2,24 @@
 
 All notable changes to Agent Beacon are documented here.
 
+## [0.2.0] - 2026-08-22
+
+### Added
+
+- Authoritative SQLite run ledger with durable lifecycle records and transition history.
+- Atomic `open_for_user_input`, which pauses superseded nonterminal runs and opens the incoming run in one transaction.
+- Typed public ledger records, results, and conflict, terminal, unknown-run, and corruption errors.
+- Read-only, fail-closed Hermes `sessions.json` restart-handoff projection with exact session and run ownership checks.
+
+### Changed
+
+- Ledger reads now fail closed when persisted run state is malformed or internally inconsistent.
+- Concurrent lifecycle updates use guarded writes to prevent contradictory transitions and duplicate terminal history.
+
+### Operational note
+
+- This release does not imply or perform a live Hermes rollout. The handoff projection is non-authoritative and cannot mutate Hermes sessions or the Agent Beacon ledger; live enablement remains host-version specific and requires the verified seams and rollback described below.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added

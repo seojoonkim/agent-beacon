@@ -1,21 +1,32 @@
 """Thread-safe SQLite event ledger and open-lineage persistence."""
 
+from contextlib import contextmanager
 from pathlib import Path
 import json
 import sqlite3
 import threading
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .event import Phase, TaskStatusEvent
+
+# Long enough that two independent connections serialize instead of surfacing
+# "database is locked" to callers.
+_BUSY_TIMEOUT_SECONDS = 30.0
 
 
 class SqliteStore:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
         self._lock = threading.RLock()
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        self._write_depth = 0
+        self._connection = sqlite3.connect(
+            self.path, check_same_thread=False, timeout=_BUSY_TIMEOUT_SECONDS
+        )
         with self._connection:
             self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute(
+                f"PRAGMA busy_timeout={int(_BUSY_TIMEOUT_SECONDS * 1000)}"
+            )
             self._connection.execute(
                 """CREATE TABLE IF NOT EXISTS events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,6 +41,61 @@ class SqliteStore:
                     is_open INTEGER NOT NULL CHECK (is_open IN (0, 1))
                 )"""
             )
+            self._connection.execute(
+                """CREATE TABLE IF NOT EXISTS runs (
+                    lineage_key TEXT PRIMARY KEY,
+                    phase TEXT NOT NULL,
+                    opened_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    is_terminal INTEGER NOT NULL CHECK (is_terminal IN (0, 1))
+                )"""
+            )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS runs_nonterminal ON runs(is_terminal, lineage_key)"
+            )
+            self._connection.execute(
+                """CREATE TABLE IF NOT EXISTS run_transitions (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lineage_key TEXT NOT NULL,
+                    from_state TEXT,
+                    to_state TEXT NOT NULL,
+                    at TEXT NOT NULL
+                )"""
+            )
+            self._connection.execute(
+                """CREATE INDEX IF NOT EXISTS run_transitions_lineage
+                   ON run_transitions(lineage_key, sequence)"""
+            )
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Serialized, atomic access to the underlying connection."""
+        with self._lock, self._connection:
+            yield self._connection
+
+    @contextmanager
+    def write_transaction(self) -> Iterator[sqlite3.Connection]:
+        """An explicit BEGIN IMMEDIATE write transaction on this store.
+
+        The write lock is taken up front, so two connections racing on the same
+        file serialize on the busy timeout rather than failing mid-transaction.
+        Nesting is rejected deterministically and leaves the outer transaction
+        untouched.
+        """
+        with self._lock:
+            if self._write_depth:
+                raise RuntimeError("write_transaction is not reentrant")
+            self._connection.execute("BEGIN IMMEDIATE")
+            self._write_depth = 1
+            try:
+                yield self._connection
+            except BaseException:
+                self._connection.rollback()
+                raise
+            else:
+                self._connection.commit()
+            finally:
+                self._write_depth = 0
 
     @staticmethod
     def _key(event: TaskStatusEvent) -> str:

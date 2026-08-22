@@ -69,6 +69,39 @@ text = render(decision.event) if decision.emit else None
 
 `StateRegistry` is the sole event producer. Callers provide typed evidence; they do not construct user-visible status claims directly.
 
+## Durable run ledger
+
+The SQLite-backed `RunLedger` is the authoritative lifecycle record for runs. A
+new user input can atomically pause every nonterminal run in the same complete
+conversation scope and announce its replacement:
+
+```python
+from datetime import datetime, timezone
+
+from agent_beacon import LineageKey, Phase, RunLedger
+from agent_beacon.store import SqliteStore
+
+lineage = LineageKey(
+    profile="example-profile",
+    platform="telegram",
+    account="bot:2e91…",
+    chat_id="example-chat",
+    topic_id="none",
+    session_key="agent:example:telegram:direct:example-chat",
+    run_id="run-2026-08-22-002",
+)
+
+with SqliteStore("agent-beacon.sqlite3") as store:
+    ledger = RunLedger(store)
+    opened = ledger.open_for_user_input(lineage, datetime.now(timezone.utc))
+    ledger.activate(opened.opened.lineage, datetime.now(timezone.utc))
+    ledger.terminate(lineage, datetime.now(timezone.utc), Phase.COMPLETED)
+```
+
+`open_for_user_input` performs preemption and opening in one transaction. Ledger
+reads fail closed with `CorruptLedgerError` if persisted run data is unsafe to
+interpret.
+
 ## Hermes adapter
 
 `agent_beacon_hermes` provides:
@@ -80,6 +113,23 @@ text = render(decision.event) if decision.emit else None
 - idempotent shutdown and abandoned-lineage recovery helpers
 
 The adapter is optional. Importing `agent_beacon` does not import Hermes.
+
+### Read-only restart handoff projection
+
+The Hermes adapter can project safe identity and resume evidence from
+`sessions.json` without modifying that file or the Agent Beacon ledger:
+
+```python
+from agent_beacon_hermes import read_resume_handoff
+
+handoff = read_resume_handoff("/path/to/sessions.json", lineage)
+if handoff is not None:
+    resume_token = handoff.resume_token
+```
+
+This projection is deliberately **non-authoritative** and read-only. It returns
+`None` when exact session/run ownership or a safe input shape cannot be proven;
+it does not open, activate, resume, or otherwise mutate a run.
 
 Hermes background-process snapshots are deliberately not treated as v0.1
 evidence because the inspected API does not expose an exact owning run session.
@@ -113,7 +163,12 @@ The public event schema is distributed at `agent_beacon/schema/task-status-event
 
 ## Current release boundary
 
-v0.1.0 delivers the framework-neutral core and the first Hermes adapter contract. Operational live rollout remains host-version specific: an integration must provide a verified heartbeat seam, exact source routing, current-run identity, fail-closed suppression, and rollback before enabling `live`.
+v0.2.0 adds the authoritative durable run ledger and the non-authoritative,
+read-only Hermes restart-handoff projection. Operational live rollout remains
+host-version specific: an integration must provide a verified heartbeat seam,
+exact source routing, current-run identity, fail-closed suppression, and
+rollback before enabling `live`. Installing v0.2.0 does not imply a live Hermes
+rollout.
 
 ## License
 

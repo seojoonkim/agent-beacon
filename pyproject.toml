@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-beacon"
-version = "0.1.0"
+version = "0.2.0"
 description = "Truthful, lineage-scoped status reporting from verified agent-runtime evidence"
 readme = "README.md"
 requires-python = ">=3.11"
