@@ -315,15 +315,47 @@ class RunLedger:
                    WHERE lineage_key = ? ORDER BY sequence""",
                 (_key(lineage),),
             ).fetchall()
-        return [
-            RunTransition(
-                lineage=lineage,
-                from_state=None if from_state is None else Phase(from_state),
-                to_state=Phase(to_state),
-                at=datetime.fromisoformat(at),
-            )
-            for from_state, to_state, at in rows
-        ]
+
+        transitions: list[RunTransition] = []
+        for from_state, to_state, at in rows:
+            try:
+                moment = datetime.fromisoformat(at)
+                transition = RunTransition(
+                    lineage=lineage,
+                    from_state=None if from_state is None else Phase(from_state),
+                    to_state=Phase(to_state),
+                    at=moment,
+                )
+            except (TypeError, ValueError, OverflowError) as error:
+                raise CorruptLedgerError("invalid persisted run transition") from error
+            if moment.tzinfo is None:
+                raise CorruptLedgerError(
+                    "persisted run transition timestamp must be timezone-aware"
+                )
+            if not transitions:
+                if (
+                    transition.from_state is not None
+                    or transition.to_state is not Phase.ANNOUNCED
+                ):
+                    raise CorruptLedgerError(
+                        "persisted run history has an invalid initial transition"
+                    )
+            else:
+                previous = transitions[-1]
+                if transition.from_state is not previous.to_state:
+                    raise CorruptLedgerError(
+                        "persisted run history has a broken transition chain"
+                    )
+                if transition.at <= previous.at:
+                    raise CorruptLedgerError(
+                        "persisted run history timestamps are not monotonic"
+                    )
+                if not can_transition(previous.to_state, transition.to_state):
+                    raise CorruptLedgerError(
+                        "persisted run history contains an illegal transition"
+                    )
+            transitions.append(transition)
+        return transitions
 
     @classmethod
     def _reject_stale(

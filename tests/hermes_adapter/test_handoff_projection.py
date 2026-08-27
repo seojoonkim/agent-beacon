@@ -23,6 +23,7 @@ def handoff_entry(**overrides):
     handoff = {
         "resume_token": "token-abc",
         "agent_beacon_run_id": RUN,
+        "agent_beacon_lineage": handoff_lineage().to_dict(),
     }
     handoff.update(overrides.pop("handoff", {}))
     entry = {
@@ -208,7 +209,7 @@ def test_handoff_projection_rejects_mismatched_or_non_string_agent_beacon_run_id
         assert read_resume_handoff(path, handoff_lineage()) is None
 
 
-def test_handoff_projection_accepts_optional_exact_full_lineage(tmp_path):
+def test_handoff_projection_accepts_exact_full_lineage(tmp_path):
     path = write_sessions(
         tmp_path,
         {SESSION: handoff_entry(handoff={"agent_beacon_lineage": handoff_lineage().to_dict()})},
@@ -216,7 +217,17 @@ def test_handoff_projection_accepts_optional_exact_full_lineage(tmp_path):
     assert read_resume_handoff(path, handoff_lineage()).lineage == handoff_lineage()
 
 
-def test_handoff_projection_rejects_mismatched_optional_full_lineage(tmp_path):
+def test_handoff_projection_rejects_missing_full_lineage(tmp_path):
+    entry = handoff_entry()
+    del entry["runtime_resume_handoff"]["agent_beacon_lineage"]
+    path = write_sessions(tmp_path, {SESSION: entry})
+    before = Path(path).read_bytes()
+
+    assert read_resume_handoff(path, handoff_lineage()) is None
+    assert Path(path).read_bytes() == before
+
+
+def test_handoff_projection_rejects_mismatched_full_lineage(tmp_path):
     other = handoff_lineage(session=SESSION, run=RUN).to_dict() | {"chat_id": "other-chat"}
     path = write_sessions(
         tmp_path, {SESSION: handoff_entry(handoff={"agent_beacon_lineage": other})}
@@ -224,7 +235,7 @@ def test_handoff_projection_rejects_mismatched_optional_full_lineage(tmp_path):
     assert read_resume_handoff(path, handoff_lineage()) is None
 
 
-def test_handoff_projection_rejects_malformed_optional_full_lineage(tmp_path):
+def test_handoff_projection_rejects_malformed_full_lineage(tmp_path):
     for malformed in ({"profile": "default"}, {"bogus": "x"}, "default", ["default"], {}):
         path = write_sessions(
             tmp_path, {SESSION: handoff_entry(handoff={"agent_beacon_lineage": malformed})}

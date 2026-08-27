@@ -74,9 +74,7 @@ def _load(path: str | Path) -> object | None:
 
 
 def _lineage_claim_matches(handoff: dict, lineage: LineageKey) -> bool:
-    if "agent_beacon_lineage" not in handoff:
-        return True
-    claim = handoff["agent_beacon_lineage"]
+    claim = handoff.get("agent_beacon_lineage")
     if not isinstance(claim, dict):
         return False
     try:

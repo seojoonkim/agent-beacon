@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from agent_beacon import Evidence, LineageKey, Phase, StateRegistry
+from agent_beacon import CompletionReport, Evidence, LineageKey, Phase, StateRegistry
 from agent_beacon.machine import can_transition
 
 
@@ -26,7 +26,12 @@ def test_closed_phase_is_terminal_for_same_run(closed_phase):
     registry = StateRegistry()
     key = LineageKey("p", "telegram", "a", "c", "t", "s", "r")
     now = datetime.now(timezone.utc)
-    assert registry.observe(Evidence(key, now, closed_phase)).emit
+    report = (
+        CompletionReport("completed", ("closed run",), ("state checked",), ("none",))
+        if closed_phase is Phase.COMPLETED
+        else None
+    )
+    assert registry.observe(Evidence(key, now, closed_phase, completion_report=report)).emit
 
     decision = registry.observe(Evidence(key, now + timedelta(seconds=1), Phase.ACTIVE))
 

@@ -50,6 +50,17 @@ def raw_row(path):
     return row
 
 
+def tamper_transition(path, **columns):
+    connection = sqlite3.connect(path)
+    with connection:
+        assignments = ", ".join(f"{name} = ?" for name in columns)
+        connection.execute(
+            f"UPDATE run_transitions SET {assignments} WHERE lineage_key = ?",
+            (*columns.values(), lineage_key(key())),
+        )
+    connection.close()
+
+
 TAMPERINGS = [
     pytest.param({"phase": "bogus"}, id="unknown-phase"),
     pytest.param({"is_terminal": 1}, id="terminal-flag-without-terminal-phase"),
@@ -127,3 +138,59 @@ def test_corrupt_ledger_error_is_not_silently_a_run_conflict():
     from agent_beacon.ledger import RunConflictError
 
     assert not issubclass(CorruptLedgerError, RunConflictError)
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param({"from_state": "bogus"}, id="unknown-from-phase"),
+        pytest.param({"to_state": "bogus"}, id="unknown-to-phase"),
+        pytest.param({"at": "2026-06-01T00:00:00"}, id="naive-timestamp"),
+        pytest.param({"at": "not-a-timestamp"}, id="unparseable-timestamp"),
+    ],
+)
+def test_history_fails_closed_without_rewriting_a_malformed_transition(tmp_path, columns):
+    path = tmp_path / "db"
+    seeded(path)
+    tamper_transition(path, **columns)
+    before = path.read_bytes()
+
+    with SqliteStore(path) as store:
+        with pytest.raises(CorruptLedgerError):
+            RunLedger(store=store).history(key())
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        pytest.param({1: {"from_state": "completed"}}, id="broken-adjacency"),
+        pytest.param({0: {"from_state": "active"}}, id="nonempty-initial-from-state"),
+        pytest.param({1: {"at": NOW.isoformat()}}, id="nonmonotonic-time"),
+    ],
+)
+def test_history_fails_closed_on_an_internally_inconsistent_chain(tmp_path, updates):
+    path = tmp_path / "db"
+    with SqliteStore(path) as store:
+        ledger = RunLedger(store=store)
+        ledger.open_run(key(), NOW)
+        ledger.activate(key(), NOW + timedelta(seconds=1))
+
+    connection = sqlite3.connect(path)
+    with connection:
+        rows = connection.execute(
+            "SELECT sequence FROM run_transitions WHERE lineage_key = ? ORDER BY sequence",
+            (lineage_key(key()),),
+        ).fetchall()
+        for index, columns in updates.items():
+            assignments = ", ".join(f"{name} = ?" for name in columns)
+            connection.execute(
+                f"UPDATE run_transitions SET {assignments} WHERE sequence = ?",
+                (*columns.values(), rows[index][0]),
+            )
+    connection.close()
+
+    with SqliteStore(path) as store:
+        with pytest.raises(CorruptLedgerError):
+            RunLedger(store=store).history(key())

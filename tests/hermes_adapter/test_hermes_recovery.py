@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from agent_beacon import Evidence, LineageKey, Phase, StateRegistry
+from agent_beacon import CompletionReport, Evidence, LineageKey, Phase, StateRegistry
 from agent_beacon.store import SqliteStore
 from agent_beacon_hermes.recovery import recover_abandoned
 
@@ -48,7 +48,14 @@ def test_recovery_is_idempotent_never_reopens_or_touches_terminal_rows(tmp_path)
         registry = StateRegistry(store=store)
         assert registry.observe(Evidence(open_key, NOW, Phase.ANNOUNCED)).emit
         assert registry.observe(Evidence(terminal_key, NOW, Phase.ANNOUNCED)).emit
-        assert registry.close(terminal_key, NOW + timedelta(microseconds=1), phase=Phase.COMPLETED)
+        assert registry.close(
+            terminal_key,
+            NOW + timedelta(microseconds=1),
+            phase=Phase.COMPLETED,
+            completion_report=CompletionReport(
+                "completed", ("closed run",), ("terminal row checked",), ("none",)
+            ),
+        )
 
         first = recover_abandoned(store, {open_key: Phase.PAUSED, terminal_key: Phase.BLOCKED}, NOW + timedelta(seconds=1))
         second = recover_abandoned(store, {open_key: Phase.BLOCKED}, NOW + timedelta(seconds=2))

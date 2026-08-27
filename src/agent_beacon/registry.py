@@ -6,7 +6,7 @@ import threading
 from typing import Protocol
 
 from .dedupe import EventDeduplicator
-from .event import Evidence, Phase, TaskStatusEvent
+from .event import CompletionReport, Evidence, Phase, TaskStatusEvent
 from .lineage import LineageKey
 from .machine import can_transition
 
@@ -64,13 +64,18 @@ class StateRegistry:
 
             # Accepted observations advance monotonic state even when their
             # equivalent user-visible event is suppressed.
-            self._accepted[evidence.lineage] = evidence
             if not self._dedupe.should_emit(evidence):
+                self._accepted[evidence.lineage] = evidence
                 return Decision(False, reason="duplicate")
 
             event = self._event_from_evidence(evidence)
-            if self._store is not None:
-                self._store.append(event)
+            try:
+                if self._store is not None:
+                    self._store.append(event)
+            except BaseException:
+                self._dedupe.forget(evidence.lineage)
+                raise
+            self._accepted[evidence.lineage] = evidence
             return Decision(True, event=event)
 
     @staticmethod
@@ -82,6 +87,7 @@ class StateRegistry:
             waiting_on_worker=evidence.waiting_on_worker,
             live_worker_count=evidence.live_worker_count,
             process_active=evidence.process_active,
+            completion_report=evidence.completion_report,
         )
 
     def phase(self, lineage: LineageKey) -> Phase | None:
@@ -95,6 +101,7 @@ class StateRegistry:
         observed_at: datetime,
         *,
         phase: Phase = Phase.PAUSED,
+        completion_report: CompletionReport | None = None,
     ) -> TaskStatusEvent | None:
         """Close one exact open lineage, returning its sole terminal event."""
         if observed_at.tzinfo is None:
@@ -111,12 +118,17 @@ class StateRegistry:
             }:
                 return None
             timestamp = max(observed_at, previous.observed_at + timedelta(microseconds=1))
-            evidence = Evidence(lineage=lineage, observed_at=timestamp, phase=phase)
+            evidence = Evidence(
+                lineage=lineage,
+                observed_at=timestamp,
+                phase=phase,
+                completion_report=completion_report,
+            )
             event = self._event_from_evidence(evidence)
-            self._accepted[lineage] = evidence
-            self._dedupe.forget(lineage)
             if self._store is not None:
                 self._store.append(event)
+            self._accepted[lineage] = evidence
+            self._dedupe.forget(lineage)
             return event
 
     def close_all(
@@ -124,6 +136,7 @@ class StateRegistry:
         observed_at: datetime,
         *,
         phase: Phase = Phase.PAUSED,
+        completion_report: CompletionReport | None = None,
     ) -> list[TaskStatusEvent]:
         """Close every currently open lineage exactly once.
 
@@ -141,11 +154,23 @@ class StateRegistry:
                 if previous.phase in {Phase.COMPLETED, Phase.BLOCKED, Phase.PAUSED}:
                     continue
                 timestamp = max(observed_at, previous.observed_at + timedelta(microseconds=1))
-                evidence = Evidence(lineage=lineage, observed_at=timestamp, phase=phase)
+                evidence = Evidence(
+                    lineage=lineage,
+                    observed_at=timestamp,
+                    phase=phase,
+                    completion_report=completion_report,
+                )
                 event = self._event_from_evidence(evidence)
-                self._accepted[lineage] = evidence
-                self._dedupe.forget(lineage)
                 events.append(event)
             if self._store is not None and events:
                 self._store.append_many(tuple(events))
+            for event in events:
+                evidence = Evidence(
+                    lineage=event.lineage,
+                    observed_at=event.observed_at,
+                    phase=event.phase,
+                    completion_report=event.completion_report,
+                )
+                self._accepted[event.lineage] = evidence
+                self._dedupe.forget(event.lineage)
             return events

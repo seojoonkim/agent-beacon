@@ -37,6 +37,54 @@ class WorkerObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class CompletionReport:
+    """Evidence-backed user-visible completion contract.
+
+    Every field is required and non-empty so a terminal success cannot collapse
+    into a bare ``completed`` flag that omits what ran or how it was checked.
+    """
+
+    outcome: str
+    actions: tuple[str, ...]
+    verification: tuple[str, ...]
+    remaining_issues: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for field_name in ("outcome",):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+        for field_name in ("actions", "verification", "remaining_issues"):
+            raw_values = getattr(self, field_name)
+            if not isinstance(raw_values, (list, tuple)):
+                raise ValueError(f"{field_name} must be a sequence of strings")
+            values = tuple(raw_values)
+            if not values or any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValueError(f"{field_name} must contain non-empty strings")
+            object.__setattr__(self, field_name, values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "actions": list(self.actions),
+            "verification": list(self.verification),
+            "remaining_issues": list(self.remaining_issues),
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CompletionReport":
+        expected = {"outcome", "actions", "verification", "remaining_issues"}
+        if set(value) != expected:
+            raise ValueError("completion_report fields must match the completion contract")
+        return cls(
+            outcome=value["outcome"],
+            actions=value["actions"],
+            verification=value["verification"],
+            remaining_issues=value["remaining_issues"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Evidence:
     lineage: LineageKey
     observed_at: datetime
@@ -44,11 +92,20 @@ class Evidence:
     waiting_on_worker: bool = False
     workers: tuple[WorkerObservation, ...] = ()
     process_active: bool = False
+    completion_report: CompletionReport | None = None
 
     def __post_init__(self) -> None:
         if self.observed_at.tzinfo is None:
             raise ValueError("observed_at must be timezone-aware")
         object.__setattr__(self, "workers", tuple(self.workers))
+        if self.completion_report is not None and not isinstance(
+            self.completion_report, CompletionReport
+        ):
+            raise ValueError("completion_report must be a CompletionReport")
+        if self.phase is Phase.COMPLETED and self.completion_report is None:
+            raise ValueError("completed evidence requires completion_report")
+        if self.phase is not Phase.COMPLETED and self.completion_report is not None:
+            raise ValueError("completion_report is only valid for completed evidence")
 
     @property
     def live_worker_count(self) -> int:
@@ -63,6 +120,7 @@ class TaskStatusEvent:
     waiting_on_worker: bool
     live_worker_count: int
     process_active: bool
+    completion_report: CompletionReport | None = None
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -73,9 +131,23 @@ class TaskStatusEvent:
             raise ValueError("live_worker_count cannot be negative")
         if self.waiting_on_worker and self.live_worker_count == 0:
             raise ValueError("waiting_on_worker requires a live worker")
+        if self.completion_report is not None and not isinstance(
+            self.completion_report, CompletionReport
+        ):
+            raise ValueError("completion_report must be a CompletionReport")
+        if self.schema_version == "1" and self.completion_report is not None:
+            raise ValueError("completion_report is not valid for schema version 1")
+        if (
+            self.schema_version != "1"
+            and self.phase is Phase.COMPLETED
+            and self.completion_report is None
+        ):
+            raise ValueError("completed event requires completion_report")
+        if self.phase is not Phase.COMPLETED and self.completion_report is not None:
+            raise ValueError("completion_report is only valid for completed events")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "lineage": self.lineage.to_dict(),
             "phase": self.phase.value,
@@ -84,6 +156,9 @@ class TaskStatusEvent:
             "live_worker_count": self.live_worker_count,
             "process_active": self.process_active,
         }
+        if self.completion_report is not None:
+            value["completion_report"] = self.completion_report.to_dict()
+        return value
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "TaskStatusEvent":
@@ -96,4 +171,9 @@ class TaskStatusEvent:
             waiting_on_worker=value["waiting_on_worker"],
             live_worker_count=value["live_worker_count"],
             process_active=value["process_active"],
+            completion_report=(
+                CompletionReport.from_dict(value["completion_report"])
+                if value.get("completion_report") is not None
+                else None
+            ),
         )

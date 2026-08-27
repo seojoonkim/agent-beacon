@@ -1,6 +1,6 @@
 """Truthful status events from verified agent-runtime evidence."""
 
-from .event import Evidence, Phase, TaskStatusEvent, WorkerObservation
+from .event import CompletionReport, Evidence, Phase, TaskStatusEvent, WorkerObservation
 from .ledger import (
     CorruptLedgerError,
     RunConflictError,
@@ -18,6 +18,7 @@ from .render import render
 
 __all__ = [
     "Decision",
+    "CompletionReport",
     "CorruptLedgerError",
     "Evidence",
     "LineageKey",

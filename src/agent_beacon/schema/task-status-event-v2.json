@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-beacon.dev/schema/task-status-event-v2.json",
+  "title": "Agent Beacon Task Status Event v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "lineage", "phase", "observed_at", "waiting_on_worker", "live_worker_count", "process_active"],
+  "properties": {
+    "schema_version": {"const": "2"},
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "platform", "account", "chat_id", "topic_id", "session_key", "run_id"],
+      "properties": {
+        "profile": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "minLength": 1},
+        "account": {"type": "string", "minLength": 1},
+        "chat_id": {"type": "string", "minLength": 1},
+        "topic_id": {"type": "string", "minLength": 1},
+        "session_key": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "phase": {"enum": ["announced", "active", "blocked", "paused", "completed"]},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "waiting_on_worker": {"type": "boolean"},
+    "live_worker_count": {"type": "integer", "minimum": 0},
+    "process_active": {"type": "boolean"},
+    "completion_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "actions", "verification", "remaining_issues"],
+      "properties": {
+        "outcome": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+        "actions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"}},
+        "verification": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"}},
+        "remaining_issues": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"}}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "completed"}}},
+      "then": {"required": ["completion_report"]},
+      "else": {"not": {"required": ["completion_report"]}}
+    }
+  ]
+}
